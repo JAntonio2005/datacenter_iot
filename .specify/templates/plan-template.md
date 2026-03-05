@@ -31,7 +31,16 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- **Thermal Safety Gate**: Plan defines critical threshold behavior and explicit
+  `stop_critico` emission/handling path for critical events.
+- **Event-Decoupling Gate**: Inter-module communication uses MQTT events and avoids
+  direct service-to-service calls (except Dashboard ↔ Backend HTTP/WebSocket).
+- **Traceability Gate**: Plan includes auditable event trail (telemetry, alarms,
+  commands, ACKs) with persistence strategy in PostgreSQL.
+- **Idempotency Gate**: Plan defines deduplication/idempotent handling for MQTT
+  duplicates using `command_id` and/or `correlation_id`.
+- **Hysteresis Gate**: Plan documents non-flapping state transition logic and
+  threshold parameters.
 
 ## Project Structure
 

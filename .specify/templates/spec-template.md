@@ -75,6 +75,16 @@
 - What happens when [boundary condition]?
 - How does system handle [error scenario]?
 
+### Event Contracts & State Rules *(mandatory for event-driven features)*
+
+- **Topics**: [List publish/subscribe topics and ownership]
+- **Telemetry Contract**: [Required payload fields and validation rules]
+- **Command Contract**: [command_id, action, reason, correlation_id semantics]
+- **ACK Contract**: [status values, failure details, retry behavior]
+- **Idempotency Strategy**: [How duplicates/replays are handled safely]
+- **State Transitions**: [Normal/Warning/Critical/Recovery entry and exit criteria]
+- **Hysteresis Parameters**: [Threshold values and anti-flapping rule]
+
 ## Requirements *(mandatory)*
 
 <!--
@@ -89,6 +99,8 @@
 - **FR-003**: Users MUST be able to [key interaction, e.g., "reset their password"]
 - **FR-004**: System MUST [data requirement, e.g., "persist user preferences"]
 - **FR-005**: System MUST [behavior, e.g., "log all security events"]
+- **FR-006**: System MUST define auditable event logging for all critical operations.
+- **FR-007**: System MUST enforce idempotent handling for externally delivered events.
 
 *Example of marking unclear requirements:*
 

@@ -1,0 +1,58 @@
+@startuml
+title SEDCM MVP - Arquitectura (Event-Driven)
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam wrapWidth 220
+skinparam maxMessageSize 200
+
+actor "Operador" as operator
+
+node "Docker Compose" {
+  package "Simuladores" {
+    [cAdvisor Bridge\n(simulators/cadvisor-bridge)] as cadvisor
+    [Environment Simulator\n(simulators/environment)] as envsim
+  }
+
+  queue "Mosquitto\nMQTT Broker" as mqtt
+
+  component "Backend\nFastAPI + Rules Engine\n(backend/app)" as backend
+  database "PostgreSQL\ntelemetry_samples\nrack_state\naudit_log\nprocessed_message" as pg
+
+  component "Edge Executor\nDocker Adapter + Idempotency\n(edge-executor/app)" as edge
+
+  component "Dashboard\nHTTP + WebSocket\n(dashboard/src)" as dashboard
+}
+
+cloud "Docker API Local" as dockerapi
+
+operator --> dashboard : Visualiza estado\ny eventos en tiempo real
+
+cadvisor -down-> mqtt : publish\ndc/telemetria/zona/{Z}/rack/{R}/host/{H}/contenedor/{C}
+envsim -down-> mqtt : publish\nambiental por zone/rack\n(temp/hum/power)
+
+mqtt -down-> backend : consume telemetría\n+ fusión cAdvisor + ambiental
+backend -> backend : validar payload\nreglas + histéresis\n(T1=40, T2=45, Treset=42, margen=1)
+backend --> pg : persistir telemetría\nestado y auditoría
+
+backend -down-> mqtt : publish comando\ndc/comandos/zona/{Z}/rack/{R}\naction=stop_critico
+
+mqtt -down-> edge : consume comando\n(idempotencia por command_id)
+edge --> dockerapi : stop contenedor\nlabels: dc.zone, dc.rack, dc.critical=true
+edge -up-> mqtt : publish ACK\ndc/eventos/zona/{Z}/rack/{R}\nstatus=ok|fail
+
+mqtt -up-> backend : consume ACK/eventos
+backend --> pg : auditoría ACK\ncorrelation_id / command_id
+
+backend --> dashboard : REST (snapshot estado)
+backend --> dashboard : WebSocket (eventos/estado)
+
+note right of backend
+  Principios clave:
+  - Desacoplamiento por MQTT
+  - Trazabilidad JSON + PostgreSQL
+  - Idempotencia ante duplicados
+  - Mitigación térmica prioritaria
+end note
+
+@enduml

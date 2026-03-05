@@ -1,0 +1,139 @@
+@startuml
+title SEDCM - Diagrama de Clases (Versión Académica)
+
+skinparam classAttributeIconSize 0
+
+' =========================
+' Entidades del Datacenter
+' =========================
+class Zona {
+  +id: String
+  +nombre: String
+}
+
+class Rack {
+  +id: String
+  +codigo: String
+}
+
+class Contenedor {
+  +id: String
+  +nombre: String
+  +esCritico: Boolean
+  +etiquetas: Map<String,String>
+  +detener(): void
+}
+
+Zona "1" o-- "*" Rack
+Rack "1" o-- "*" Contenedor
+
+' =========================
+' Mensajes que viajan por MQTT
+' =========================
+class Telemetria {
+  +fechaHora: DateTime
+  +zona: String
+  +rack: String
+  +contenedorId: String
+  +cpuPct: float
+  +ramMb: float
+  +temperaturaC: float
+  +humedadPct: float
+}
+
+class Comando {
+  +id: String
+  +fechaHora: DateTime
+  +zona: String
+  +rack: String
+  +accion: String   ' stop_critico
+  +razon: String
+}
+
+class AcuseRecibo {
+  +comandoId: String
+  +fechaHora: DateTime
+  +resultado: String  ' ok|fail
+  +detalles: String
+}
+
+' =========================
+' Lógica de decisión (umbrales + histéresis)
+' =========================
+enum EstadoRack {
+  NORMAL
+  ADVERTENCIA
+  CRITICO
+  RECUPERACION
+}
+
+class Umbrales {
+  +t1Advertencia: float = 40
+  +t2Critico: float = 45
+  +tReset: float = 42
+  +margenHisteresis: float = 1
+}
+
+class EvaluadorEstado {
+  +estadoActual: EstadoRack
+  +evaluar(tempC: float, umb: Umbrales): EstadoRack
+}
+
+Umbrales --> EvaluadorEstado
+
+' =========================
+' Componentes principales
+' =========================
+class BrokerMQTT {
+  +publicar(topico: String, mensaje: String): void
+  +suscribir(topico: String): void
+}
+
+class Simulador {
+  -broker: BrokerMQTT
+  +generarTelemetria(): Telemetria
+  +publicar(): void
+}
+
+class Backend {
+  -broker: BrokerMQTT
+  -bd: BaseDatos
+  -umbrales: Umbrales
+  -evaluador: EvaluadorEstado
+  +recibirTelemetria(t: Telemetria): void
+  +generarComandoStop(zona: String, rack: String, razon: String): Comando
+}
+
+class EdgeExecutor {
+  -broker: BrokerMQTT
+  +recibirComando(c: Comando): void
+  +detenerCritico(zona: String, rack: String): void
+  +enviarAcuse(a: AcuseRecibo): void
+}
+
+class BaseDatos {
+  +guardarTelemetria(t: Telemetria): void
+  +guardarEvento(tipo: String, json: String): void
+  +guardarAcuse(a: AcuseRecibo): void
+  +obtenerUltimoEstado(zona: String, rack: String): EstadoRack
+}
+
+class Dashboard {
+  -bd: BaseDatos
+  +mostrarEstado(): void
+  +mostrarEventos(): void
+}
+
+Simulador --> BrokerMQTT
+Backend --> BrokerMQTT
+EdgeExecutor --> BrokerMQTT
+Backend --> BaseDatos
+Dashboard --> BaseDatos
+
+Backend ..> Telemetria : consume
+Backend ..> Comando : produce
+EdgeExecutor ..> Comando : consume
+EdgeExecutor ..> AcuseRecibo : produce
+Backend ..> AcuseRecibo : consume
+
+@enduml

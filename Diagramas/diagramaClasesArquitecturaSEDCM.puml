@@ -1,0 +1,196 @@
+@startuml
+title SEDCM MVP - Diagrama de Clases (Enfoque Arquitectura)
+allowmixing
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam packageStyle rectangle
+
+package "Backend (FastAPI)" {
+  class BackendMain {
+    +startup(): void
+    +shutdown(): void
+  }
+
+  class BackendMqttClient {
+    +connect(): void
+    +subscribe(topic: String, callback: String): void
+    +publish(topic: String, payload: String): void
+    +loop_start(): void
+    +loop_stop(): void
+    +disconnect(): void
+  }
+
+  class TelemetryFusion {
+    +merge(payload: String): Map
+  }
+
+  class TelemetryConsumer {
+    +handle_message(topic: String, payload: String): void
+  }
+
+  class RulesEngine {
+    +evaluate(db: SessionLocal, telemetry: TelemetryPayload): RackStatus
+  }
+
+  class StateMachine {
+    +next_state(current: RackStatus, temp_c: float): RackStatus
+  }
+
+  class CommandPublisher {
+    +publish_stop_critico(zone: String, rack: String, reason: String, correlation_id: String): void
+  }
+
+  class AckConsumer {
+    +handle_message(topic: String, payload: String): void
+  }
+
+  class AuditService {
+    +record(event_type: String, zone: String, rack: String, correlation_id: String, command_id: String, details: String): void
+  }
+
+  class IdempotencyRepository {
+    +has_seen(message_id: String): bool
+    +mark_seen(message_id: String): void
+  }
+}
+
+package "Persistencia" {
+  class SessionLocal
+
+  class TelemetrySample {
+    +ts: DateTime
+    +zone: String
+    +rack: String
+    +cpu_pct: float
+    +ram_mb: float
+    +temp_c: float
+    +hum_pct: float
+  }
+
+  class RackState {
+    +rack_key: String
+    +state: String
+    +updated_at: DateTime
+  }
+
+  class AuditLog {
+    +event_type: String
+    +correlation_id: String
+    +command_id: String
+    +details: String
+  }
+
+  class ProcessedMessage {
+    +message_id: String
+    +source: String
+    +seen_at: DateTime
+  }
+}
+
+package "Edge Executor" {
+  class EdgeMain {
+    +main(): void
+  }
+
+  class EdgeMqttClient {
+    +connect(): void
+    +subscribe(topic: String, callback: String): void
+    +publish(topic: String, payload: String): void
+    +loop_start(): void
+    +loop_stop(): void
+    +disconnect(): void
+  }
+
+  class CommandHandler {
+    +handle_message(topic: String, payload: String): void
+  }
+
+  class DockerAdapter {
+    +stop_critical_container(zone: String, rack: String): String
+  }
+
+  class AckPublisher {
+    +publish(zone: String, rack: String, command_id: String, status: String, details: String): void
+  }
+
+  class InMemoryIdempotencyStore {
+    +has_seen(message_id: String): bool
+    +mark_seen(message_id: String): void
+  }
+}
+
+package "Dashboard" {
+  class DashboardClient {
+    +fetch_snapshot(): void
+    +subscribe_ws(): void
+    +render_state(): void
+    +render_events(): void
+  }
+}
+
+package "Mensajería / Contratos" {
+  class TelemetryPayload
+  class CommandPayload
+  class AckPayload
+  class Topics {
+    +telemetry_topic(): String
+    +command_topic(): String
+    +events_topic(): String
+  }
+}
+
+' Para máxima compatibilidad con renderers:
+rectangle "PostgreSQL" as PostgreSQL
+rectangle "MQTT Broker" as MQTT
+
+' Backend wiring
+BackendMain --> BackendMqttClient
+BackendMain --> TelemetryConsumer
+BackendMain --> AckConsumer
+TelemetryConsumer --> TelemetryFusion
+TelemetryConsumer --> TelemetryPayload
+TelemetryConsumer --> SessionLocal
+TelemetryConsumer --> TelemetrySample
+TelemetryConsumer --> RulesEngine
+TelemetryConsumer --> AuditService
+
+RulesEngine --> StateMachine
+RulesEngine --> RackState
+RulesEngine --> CommandPublisher
+RulesEngine --> AuditService
+
+AckConsumer --> AckPayload
+AckConsumer --> AuditService
+AuditService --> AuditLog
+IdempotencyRepository --> ProcessedMessage
+
+BackendMqttClient ..> MQTT
+CommandPublisher ..> MQTT
+
+' Edge wiring
+EdgeMain --> EdgeMqttClient
+EdgeMain --> CommandHandler
+CommandHandler --> InMemoryIdempotencyStore
+CommandHandler --> DockerAdapter
+CommandHandler --> AckPublisher
+CommandHandler --> CommandPayload
+AckPublisher --> AckPayload
+EdgeMqttClient ..> MQTT
+
+' Persistencia
+SessionLocal ..> PostgreSQL
+TelemetrySample ..> PostgreSQL
+RackState ..> PostgreSQL
+AuditLog ..> PostgreSQL
+ProcessedMessage ..> PostgreSQL
+
+' Dashboard interactions
+DashboardClient ..> BackendMain : HTTP / WS
+
+note right of RulesEngine
+  Flujo crítico:
+  Telemetry -> Rules -> stop_critico -> ACK
+  + trazabilidad en AuditLog
+end note
+
+@enduml

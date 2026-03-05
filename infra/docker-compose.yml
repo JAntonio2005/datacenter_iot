@@ -1,0 +1,82 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: sedcm-mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  postgres:
+    image: postgres:16
+    container_name: sedcm-postgres
+    environment:
+      POSTGRES_USER: sedcm
+      POSTGRES_PASSWORD: sedcm
+      POSTGRES_DB: sedcm
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - pgdata:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: sedcm-backend
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+      DATABASE_URL: postgresql://sedcm:sedcm@postgres:5432/sedcm
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mosquitto
+      - postgres
+
+  edge-executor:
+    build:
+      context: ../edge-executor
+      dockerfile: Dockerfile
+    container_name: sedcm-edge-executor
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+    depends_on:
+      - mosquitto
+
+  cadvisor-bridge:
+    image: python:3.11-slim
+    container_name: sedcm-cadvisor-bridge
+    working_dir: /app
+    command: ["python", "main.py"]
+    volumes:
+      - ../simulators/cadvisor-bridge:/app
+    depends_on:
+      - mosquitto
+
+  environment-simulator:
+    image: python:3.11-slim
+    container_name: sedcm-environment-simulator
+    working_dir: /app
+    command: ["python", "main.py"]
+    volumes:
+      - ../simulators/environment:/app
+    depends_on:
+      - mosquitto
+
+  dashboard:
+    image: python:3.11-slim
+    container_name: sedcm-dashboard
+    working_dir: /app
+    command: ["python", "-m", "http.server", "5173"]
+    volumes:
+      - ../dashboard/src:/app
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:

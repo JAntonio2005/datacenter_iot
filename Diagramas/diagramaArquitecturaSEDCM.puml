@@ -1,0 +1,57 @@
+@startuml
+title SEDCM MVP - Diagrama de Arquitectura
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam wrapWidth 220
+
+actor "Operador" as operador
+
+node "Docker Compose" {
+  package "Simuladores" {
+    [cAdvisor Bridge\n(simulators/cadvisor-bridge)] as cadvisor
+    [Environment Simulator\n(simulators/environment)] as envsim
+  }
+
+  queue "Mosquitto\nMQTT Broker" as mqtt
+
+  component "Backend\nFastAPI + Rules Engine\n(backend/app)" as backend
+  database "PostgreSQL\ntelemetry_samples\nrack_state\naudit_log\nprocessed_message" as postgres
+
+  component "Edge Executor\nDocker Adapter + Idempotency\n(edge-executor/app)" as edge
+  component "Dashboard\nHTTP + WebSocket\n(dashboard/src)" as dashboard
+}
+
+cloud "Docker API Local" as dockerapi
+
+operador --> dashboard : Consulta estado\ny eventos en tiempo real
+
+cadvisor --> mqtt : publica telemetría\ndc/telemetria/zona/{Z}/rack/{R}/host/{H}/contenedor/{C}
+envsim --> mqtt : publica variables\nambientales (temp/hum/power)
+
+mqtt --> backend : consume telemetría
+backend -> backend : fusión cAdvisor + ambiental\nvalidación + reglas + histéresis
+backend --> postgres : persiste telemetría/estado/auditoría
+
+backend --> mqtt : publica comando\ndc/comandos/zona/{Z}/rack/{R}\naction=stop_critico
+mqtt --> edge : consume comando\n(idempotencia command_id)
+
+edge --> dockerapi : stop contenedor crítico\nlabels dc.zone/dc.rack/dc.critical=true
+edge --> mqtt : publica ACK\ndc/eventos/zona/{Z}/rack/{R} status=ok|fail
+
+mqtt --> backend : consume ACK/eventos
+backend --> postgres : guarda ACK y trazabilidad
+
+backend --> dashboard : REST (snapshot)
+backend --> dashboard : WebSocket (eventos y cambios de estado)
+
+note right of backend
+  Principios implementados:
+  - Seguridad térmica primero
+  - Desacoplamiento por MQTT
+  - Trazabilidad y auditoría
+  - Idempotencia
+  - Histéresis anti-flapping
+end note
+
+@enduml

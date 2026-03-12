@@ -6,7 +6,12 @@ services:
       - "1883:1883"
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-
+    healthcheck:
+      test: ["CMD-SHELL", "sh -c 'nc -z localhost 1883'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
   postgres:
     image: postgres:16
     container_name: sedcm-postgres
@@ -19,6 +24,12 @@ services:
     volumes:
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sedcm -d sedcm"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
 
   backend:
     build:
@@ -32,39 +43,74 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - mosquitto
-      - postgres
+      mosquitto:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 
   edge-executor:
-    build:
+     build:
       context: ../edge-executor
       dockerfile: Dockerfile
-    container_name: sedcm-edge-executor
-    environment:
+     container_name: sedcm-edge-executor
+     environment:
       MQTT_HOST: mosquitto
       MQTT_PORT: 1883
-    depends_on:
+     volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+     depends_on:
       - mosquitto
 
   cadvisor-bridge:
     image: python:3.11-slim
     container_name: sedcm-cadvisor-bridge
+    hostname: cadvisor-bridge
     working_dir: /app
-    command: ["python", "main.py"]
+    command: ["sh", "-c", "pip install -r requirements.txt && python -u main.py"]
     volumes:
       - ../simulators/cadvisor-bridge:/app
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+      CADVISOR_URL: http://cadvisor:8080
+      INTERVAL_SEC: 3
     depends_on:
-      - mosquitto
+      mosquitto:
+        condition: service_healthy
+      cadvisor:
+        condition: service_started
+    restart: unless-stopped
+  
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: sedcm-cadvisor
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    privileged: true
+    restart: unless-stopped
 
   environment-simulator:
     image: python:3.11-slim
     container_name: sedcm-environment-simulator
     working_dir: /app
-    command: ["python", "main.py"]
+    command: ["sh", "-c", "pip install -r requirements.txt && python main.py"]
     volumes:
       - ../simulators/environment:/app
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
     depends_on:
-      - mosquitto
+      mosquitto:
+        condition: service_healthy
+    restart: unless-stopped
 
   dashboard:
     image: python:3.11-slim
@@ -77,6 +123,153 @@ services:
       - "5173:5173"
     depends_on:
       - backend
+  critico-a1:
+    image: alpine:3.19
+    container_name: sedcm-critico-a1
+    command: ["sh", "-c", "sleep 999999"]
+    labels:
+      dc.zone: "A"
+      dc.rack: "A1"
+      dc.critical: "true"
+    restart: unless-stopped
 
+  critico-a2:
+    image: alpine:3.19
+    container_name: sedcm-critico-a2
+    command: ["sh", "-c", "sleep 999999"]
+    labels:
+      dc.zone: "A"
+      dc.rack: "A2"
+      dc.critical: "true"
+    restart: unless-stopped
+
+  critico-a3:
+    image: alpine:3.19
+    container_name: sedcm-critico-a3
+    command: ["sh", "-c", "sleep 999999"]
+    labels:
+      dc.zone: "A"
+      dc.rack: "A3"
+      dc.critical: "true"
+    restart: unless-stopped
+
+  critico-b1:
+    image: alpine:3.19
+    container_name: sedcm-critico-b1
+    command: ["sh", "-c", "sleep 999999"]
+    labels:
+      dc.zone: "B"
+      dc.rack: "B1"
+      dc.critical: "true"
+    restart: unless-stopped
+
+  critico-b2:
+    image: alpine:3.19
+    container_name: sedcm-critico-b2
+    command: ["sh", "-c", "sleep 999999"]
+    labels:
+      dc.zone: "B"
+      dc.rack: "B2"
+      dc.critical: "true"
+    restart: unless-stopped
+
+  critico-b3:
+    image: alpine:3.19
+    container_name: sedcm-critico-b3
+    command: ["sh", "-c", "sleep 999999"]
+    labels:
+      dc.zone: "B"
+      dc.rack: "B3"
+      dc.critical: "true"
+    restart: unless-stopped
+    # --- A1 ---
+  svc-a1-a:
+    image: alpine:3.19
+    container_name: sedcm-svc-a1-a
+    command: ["sh", "-c", "sleep 999999"]
+    labels: { dc.zone: "A", dc.rack: "A1", dc.critical: "false" }
+    restart: unless-stopped
+
+  svc-a1-b:
+    image: alpine:3.19
+    container_name: sedcm-svc-a1-b
+    command: ["sh", "-c", "sleep 999999"]
+    labels: { dc.zone: "A", dc.rack: "A1", dc.critical: "false" }
+    restart: unless-stopped
+
+  # --- A2 ---
+  svc-a2-a:
+    image: alpine:3.19
+    container_name: sedcm-svc-a2-a
+    command: ["sh", "-c", "sleep 999999"]
+    labels: { dc.zone: "A", dc.rack: "A2", dc.critical: "false" }
+    restart: unless-stopped
+
+  svc-a2-b:
+    image: alpine:3.19
+    container_name: sedcm-svc-a2-b
+    command: ["sh", "-c", "sleep 999999"]
+    labels: { dc.zone: "A", dc.rack: "A2", dc.critical: "false" }
+    restart: unless-stopped
+
+  # --- A3 ---
+  svc-a3-a:
+    image: alpine:3.19
+    container_name: sedcm-svc-a3-a
+    command: ["sh", "-c", "sleep 999999"]
+    labels: { dc.zone: "A", dc.rack: "A3", dc.critical: "false" }
+    restart: unless-stopped
+
+  svc-a3-b:
+    image: alpine:3.19
+    container_name: sedcm-svc-a3-b
+    command: ["sh", "-c", "sleep 999999"]
+    labels: { dc.zone: "A", dc.rack: "A3", dc.critical: "false" }
+    restart: unless-stopped
+
+  # --- B1 ---
+  svc-b1-a:
+    image: alpine:3.19
+    container_name: sedcm-svc-b1-a
+    command: ["sh", "-c", "sleep 999999"]
+    labels: { dc.zone: "B", dc.rack: "B1", dc.critical: "false" }
+    restart: unless-stopped
+
+  svc-b1-b:
+    image: alpine:3.19
+    container_name: sedcm-svc-b1-b
+    command: ["sh", "-c", "sleep 999999"]
+    labels: { dc.zone: "B", dc.rack: "B1", dc.critical: "false" }
+    restart: unless-stopped
+
+  # --- B2 ---
+  svc-b2-a:
+    image: alpine:3.19
+    container_name: sedcm-svc-b2-a
+    command: ["sh", "-c", "sleep 999999"]
+    labels: { dc.zone: "B", dc.rack: "B2", dc.critical: "false" }
+    restart: unless-stopped
+
+  svc-b2-b:
+    image: alpine:3.19
+    container_name: sedcm-svc-b2-b
+    command: ["sh", "-c", "sleep 999999"]
+    labels: { dc.zone: "B", dc.rack: "B2", dc.critical: "false" }
+    restart: unless-stopped
+
+  # --- B3 ---
+  svc-b3-a:
+    image: alpine:3.19
+    container_name: sedcm-svc-b3-a
+    command: ["sh", "-c", "sleep 999999"]
+    labels: { dc.zone: "B", dc.rack: "B3", dc.critical: "false" }
+    restart: unless-stopped
+
+  svc-b3-b:
+    image: alpine:3.19
+    container_name: sedcm-svc-b3-b
+    command: ["sh", "-c", "sleep 999999"]
+    labels: { dc.zone: "B", dc.rack: "B3", dc.critical: "false" }
+    restart: unless-stopped  
 volumes:
   pgdata:

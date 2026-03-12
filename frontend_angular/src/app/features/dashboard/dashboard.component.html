@@ -1,0 +1,45 @@
+<section class="p-4">
+  <h1 class="text-3xl font-bold mb-6">SEDCM Dashboard</h1>
+
+  @if (loading) {
+    <p>Cargando racks...</p>
+  }
+
+  @if (error) {
+    <p>{{ error }}</p>
+  }
+
+  @if (!loading && !error) {
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      @for (rack of racks; track rack.zone + rack.rack) {
+        <button
+          type="button"
+          class="rounded-2xl border bg-white shadow p-4 text-left hover:shadow-lg transition"
+          (click)="goToRack(rack)"
+        >
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-xl font-semibold">Rack {{ rack.rack }}</h2>
+
+            <span
+              class="px-3 py-1 rounded-full text-sm font-medium"
+              [class.bg-green-100]="rack.state === 'Normal'"
+              [class.text-green-700]="rack.state === 'Normal'"
+              [class.bg-yellow-100]="rack.state === 'Warning'"
+              [class.text-yellow-700]="rack.state === 'Warning'"
+              [class.bg-red-100]="rack.state === 'Critical'"
+              [class.text-red-700]="rack.state === 'Critical'"
+            >
+              {{ rack.state }}
+            </span>
+          </div>
+
+          <p><strong>Zona:</strong> {{ rack.zone }}</p>
+          <p><strong>Temperatura:</strong> {{ rack.temp_c ?? 'N/A' }} °C</p>
+          <p><strong>Humedad:</strong> {{ rack.hum_pct ?? 'N/A' }} %</p>
+          <p><strong>Potencia:</strong> {{ rack.power_w ?? 'N/A' }} W</p>
+          <p><strong>Actualizado:</strong> {{ rack.updated_at }}</p>
+        </button>
+      }
+    </div>
+  }
+</section>

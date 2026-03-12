@@ -1,0 +1,55 @@
+@startuml
+
+title SEDCM - Diagrama de Arquitectura (Actualizado)
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam wrapWidth 220
+
+actor "Operador" as operador
+
+node "Docker Compose" {
+  package "Simuladores" {
+    [cAdvisor Bridge\n(simulators/cadvisor-bridge)] as cadvisor
+    [Environment Simulator\n(simulators/environment)] as envsim
+  }
+
+  queue "Mosquitto\nMQTT Broker" as mqtt
+
+  component "Backend\nFastAPI + Rules Engine\n(backend/app)" as backend
+  database "PostgreSQL\ntelemetry_samples\nrack_state\naudit_log\nprocessed_message" as postgres
+
+  component "Edge Executor\nDocker Adapter + Idempotency\n(edge-executor/app)" as edge
+  component "Frontend Angular\n(frontend_angular)" as frontend
+}
+
+cloud "Docker API Local" as dockerapi
+
+operador --> frontend : consulta dashboard
+frontend --> backend : REST /racks y /racks/{zone}/{rack}
+
+cadvisor --> mqtt : telemetria contenedores
+envsim --> mqtt : telemetria ambiental
+
+mqtt --> backend : consume telemetria
+backend -> backend : fusion + validacion + reglas
+backend --> postgres : persiste telemetria/estado/auditoria
+
+backend --> mqtt : publica comando stop_critico
+mqtt --> edge : consume comando
+
+edge --> dockerapi : stop contenedor critico\nlabels dc.zone/dc.rack/dc.critical
+edge --> mqtt : ACK ok|fail
+
+mqtt --> backend : consume ACK/eventos
+backend --> postgres : guarda ACK y trazabilidad
+
+note right of backend
+  Principios:
+  - Seguridad termica primero
+  - Desacoplamiento por MQTT
+  - Trazabilidad y auditoria
+  - Idempotencia
+  - Histeresis anti-flapping
+end note
+
+@enduml

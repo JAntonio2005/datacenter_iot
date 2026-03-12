@@ -17,6 +17,8 @@ INTERVAL_SEC = float(os.getenv("INTERVAL_SEC", "2.0"))
 
 # Prefijo opcional para filtrar contenedores del proyecto
 NAME_PREFIX = os.getenv("NAME_PREFIX", "sedcm-")
+def is_workload_container(name: str) -> bool:
+    return name.startswith("sedcm-critico-") or name.startswith("sedcm-svc-")
 
 TOPIC_FMT = "dc/telemetria/zona/{zone}/rack/{rack}/host/{host}/contenedor/{container}"
 
@@ -108,8 +110,8 @@ def main() -> None:
 
             for c in containers:
                 name = container_name(c)
-                if not name or (NAME_PREFIX and not name.startswith(NAME_PREFIX)):
-                    continue
+                if not name or not is_workload_container(name):
+                 continue
 
                 zone, rack, _crit = parse_labels(c)
                 if not zone or not rack:

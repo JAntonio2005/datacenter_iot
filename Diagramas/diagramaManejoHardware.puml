@@ -1,0 +1,55 @@
+@startuml
+
+title SEDCM - Dominio de Hardware (Flujo Operativo)
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam wrapWidth 220
+
+actor "Operador" as operador
+
+node "Host de Rack (Docker Host)" as host {
+  component "Contenedor Critico\n(dc.critical=true)" as critico
+  component "Contenedor Servicio A" as svcA
+  component "Contenedor Servicio B" as svcB
+  component "Edge Executor" as edge
+  component "Docker API" as dockerapi
+}
+
+node "Sensores / Simuladores" as sensores {
+  component "Environment Simulator" as envsim
+  component "cAdvisor Bridge" as cadvisor
+}
+
+queue "MQTT Broker" as mqtt
+component "Backend\nRules Engine" as backend
+
+operador --> backend : consulta estado / eventos
+
+sensores --> mqtt : telemetria ambiental\n(temp/hum/power)
+sensores --> mqtt : telemetria contenedores\n(cpu/ram/net/io)
+
+mqtt --> backend : entrega telemetria
+backend -> backend : fusion + validacion + reglas
+
+backend --> mqtt : comando stop_critico\n(directivo por rack)
+mqtt --> edge : comando para rack
+
+edge --> dockerapi : detener contenedor critico\npor labels dc.zone/dc.rack/dc.critical
+edge --> mqtt : ACK ok|fail
+mqtt --> backend : ACK
+
+critico <-- dockerapi : stop
+svcA <-- dockerapi : no afectado
+svcB <-- dockerapi : no afectado
+
+note right of edge
+  Idempotencia por command_id
+  Reintentos controlados
+end note
+
+note right of backend
+  Umbrales: T1=40, T2=45, Treset=42
+  Histeresis para evitar flapping
+end note
+
+@enduml

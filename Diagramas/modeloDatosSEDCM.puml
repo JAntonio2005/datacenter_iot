@@ -1,0 +1,77 @@
+@startuml
+
+title SEDCM - Modelo de Datos (Persistencia Actual)
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+
+class TelemetrySample {
+  +id: int
+  +ts: datetime
+  +zone: string
+  +rack: string
+  +host: string
+  +container_id: string
+  +container_name: string
+  +cpu_pct: float
+  +ram_mb: float
+  +temp_c: float
+  +hum_pct: float
+  +payload: json
+  +created_at: datetime
+}
+
+class RackState {
+  +rack_key: string
+  +zone: string
+  +rack: string
+  +state: string
+  +updated_at: datetime
+}
+
+class AuditLog {
+  +id: int
+  +event_type: string
+  +correlation_id: string
+  +command_id: string
+  +zone: string
+  +rack: string
+  +details: json
+  +created_at: datetime
+}
+
+class ProcessedMessage {
+  +message_id: string
+  +source: string
+  +seen_at: datetime
+}
+
+TelemetrySample "*" --> "1" RackState : zone + rack
+AuditLog "*" --> "1" RackState : zone + rack
+ProcessedMessage "*" --> "1" AuditLog : audit scope
+
+note right of TelemetrySample
+  Datos de telemetria fusionados:
+  - cAdvisor (cpu/ram/net/io)
+  - Ambiente (temp/hum/power) si aplica
+end note
+
+note right of RackState
+  Estado actual por rack:
+  Normal | Warning | Critical | Recovery
+end note
+
+note right of AuditLog
+  Trazabilidad de eventos:
+  - telemetria_ingested
+  - telemetry_rejected
+  - rack_state_transition
+  - command_emitted
+  - edge_ack
+end note
+
+note right of ProcessedMessage
+  Idempotencia por message_id
+  (duplicados MQTT)
+end note
+
+@enduml

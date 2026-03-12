@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from fastapi.middleware.cors import CORSMiddleware
 import os
 
 from fastapi import FastAPI
@@ -13,6 +13,15 @@ from app.mqtt.telemetry_consumer import TelemetryConsumer
 from app.rules.engine import RulesEngine
 
 app = FastAPI(title="SEDCM Backend", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:4200",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 mqtt_client: BackendMqttClient | None = None
 

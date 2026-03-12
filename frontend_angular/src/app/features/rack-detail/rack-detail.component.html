@@ -1,0 +1,95 @@
+<section class="p-4">
+  <a routerLink="/" class="inline-block mb-4 text-blue-600 hover:underline">
+    ← Volver al dashboard
+  </a>
+
+  @if (loading) {
+    <p>Cargando detalle del rack...</p>
+  }
+
+  @if (error) {
+    <p>{{ error }}</p>
+  }
+
+  @if (!loading && !error && rackDetail) {
+    <div class="rounded-2xl border bg-white shadow p-4 mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <h1 class="text-2xl font-bold">
+          Rack {{ rackDetail.rack }} (Zona {{ rackDetail.zone }})
+        </h1>
+
+        <span
+          class="px-3 py-1 rounded-full text-sm font-medium"
+          [class.bg-green-100]="rackDetail.state === 'Normal'"
+          [class.text-green-700]="rackDetail.state === 'Normal'"
+          [class.bg-yellow-100]="rackDetail.state === 'Warning'"
+          [class.text-yellow-700]="rackDetail.state === 'Warning'"
+          [class.bg-red-100]="rackDetail.state === 'Critical'"
+          [class.text-red-700]="rackDetail.state === 'Critical'"
+        >
+          {{ rackDetail.state }}
+        </span>
+      </div>
+
+      <p><strong>Actualizado:</strong> {{ rackDetail.updated_at }}</p>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+        <div class="rounded-xl border p-4 bg-slate-50">
+          <p class="text-sm text-slate-500">Temperatura</p>
+          <p class="text-xl font-semibold">{{ rackDetail.ambient.temp_c ?? 'N/A' }} °C</p>
+        </div>
+
+        <div class="rounded-xl border p-4 bg-slate-50">
+          <p class="text-sm text-slate-500">Humedad</p>
+          <p class="text-xl font-semibold">{{ rackDetail.ambient.hum_pct ?? 'N/A' }} %</p>
+        </div>
+
+        <div class="rounded-xl border p-4 bg-slate-50">
+          <p class="text-sm text-slate-500">Potencia</p>
+          <p class="text-xl font-semibold">{{ rackDetail.ambient.power_w ?? 'N/A' }} W</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="rounded-2xl border bg-white shadow p-4">
+      <h2 class="text-xl font-semibold mb-4">Contenedores</h2>
+
+      <div class="overflow-x-auto">
+        <table class="min-w-full border-collapse">
+          <thead>
+            <tr class="border-b text-left">
+              <th class="py-2 pr-4">Contenedor</th>
+              <th class="py-2 pr-4">Host</th>
+              <th class="py-2 pr-4">CPU %</th>
+              <th class="py-2 pr-4">RAM MB</th>
+              <th class="py-2 pr-4">Net RX</th>
+              <th class="py-2 pr-4">Net TX</th>
+              <th class="py-2 pr-4">IO Read</th>
+              <th class="py-2 pr-4">IO Write</th>
+              <th class="py-2 pr-4">Temp</th>
+              <th class="py-2 pr-4">Hum</th>
+              <th class="py-2 pr-4">Power</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (container of rackDetail.containers; track container.container_name) {
+              <tr class="border-b">
+                <td class="py-2 pr-4">{{ container.container_name }}</td>
+                <td class="py-2 pr-4">{{ container.host ?? 'N/A' }}</td>
+                <td class="py-2 pr-4">{{ container.cpu_pct ?? 'N/A' }}</td>
+                <td class="py-2 pr-4">{{ container.ram_mb ?? 'N/A' }}</td>
+                <td class="py-2 pr-4">{{ container.net_rx ?? 'N/A' }}</td>
+                <td class="py-2 pr-4">{{ container.net_tx ?? 'N/A' }}</td>
+                <td class="py-2 pr-4">{{ container.io_read ?? 'N/A' }}</td>
+                <td class="py-2 pr-4">{{ container.io_write ?? 'N/A' }}</td>
+                <td class="py-2 pr-4">{{ container.temp_c ?? 'N/A' }}</td>
+                <td class="py-2 pr-4">{{ container.hum_pct ?? 'N/A' }}</td>
+                <td class="py-2 pr-4">{{ container.power_w ?? 'N/A' }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  }
+</section>

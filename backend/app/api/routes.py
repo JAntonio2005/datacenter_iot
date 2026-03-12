@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-from typing import Any
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from fastapi import APIRouter, Query
-from sqlalchemy import text
-
-from app.db.session import SessionLocal
+from app.api.schemas import (
+    RackAmbientResponse,
+    RackContainerResponse,
+    RackDetailResponse,
+    RackSummaryResponse,
+)
+from app.db.models import RackState, TelemetrySample
+from app.db.session import get_db
 
 router = APIRouter()
 
@@ -15,146 +21,188 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "backend"}
 
 
-@router.get("/racks")
-def list_racks() -> list[dict[str, Any]]:
-    sql = text("""
-        SELECT
-            rs.zone,
-            rs.rack,
-            rs.state,
-            rs.updated_at,
-            ts.temp_c,
-            ts.hum_pct,
-            COALESCE(ts.power_w, NULLIF(ts.payload->>'power_w', '')::double precision) AS power_w
-        FROM rack_state rs
-        LEFT JOIN LATERAL (
-            SELECT *
-            FROM telemetry_samples t
-            WHERE t.zone = rs.zone
-              AND t.rack = rs.rack
-            ORDER BY t.created_at DESC
-            LIMIT 1
-        ) ts ON true
-        ORDER BY rs.zone, rs.rack
-    """)
+@router.get("/racks", response_model=list[RackSummaryResponse])
+def get_racks(db: Session = Depends(get_db)) -> list[RackSummaryResponse]:
+    racks = db.execute(
+        select(RackState).order_by(RackState.zone, RackState.rack)
+    ).scalars().all()
 
-    with SessionLocal() as db:
-        rows = db.execute(sql).mappings().all()
-        return [dict(row) for row in rows]
+    result: list[RackSummaryResponse] = []
 
+    for rack in racks:
+        latest_any = db.execute(
+            select(TelemetrySample)
+            .where(
+                TelemetrySample.zone == rack.zone,
+                TelemetrySample.rack == rack.rack,
+            )
+            .order_by(TelemetrySample.created_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
 
-@router.get("/racks/{zone}/{rack}")
-def rack_detail(zone: str, rack: str) -> dict[str, Any]:
-    zone = zone.upper()
-    rack = rack.upper()
+        latest_temp = db.execute(
+            select(TelemetrySample)
+            .where(
+                TelemetrySample.zone == rack.zone,
+                TelemetrySample.rack == rack.rack,
+                TelemetrySample.temp_c.is_not(None),
+            )
+            .order_by(TelemetrySample.created_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
 
-    rack_sql = text("""
-        SELECT
-            rs.zone,
-            rs.rack,
-            rs.state,
-            rs.updated_at
-        FROM rack_state rs
-        WHERE rs.zone = :zone AND rs.rack = :rack
-        LIMIT 1
-    """)
+        latest_hum = db.execute(
+            select(TelemetrySample)
+            .where(
+                TelemetrySample.zone == rack.zone,
+                TelemetrySample.rack == rack.rack,
+                TelemetrySample.hum_pct.is_not(None),
+            )
+            .order_by(TelemetrySample.created_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
 
-    latest_env_sql = text("""
-        SELECT
-            t.created_at,
-            t.temp_c,
-            t.hum_pct,
-            COALESCE(t.power_w, NULLIF(t.payload->>'power_w', '')::double precision) AS power_w
-        FROM telemetry_samples t
-        WHERE t.zone = :zone
-          AND t.rack = :rack
-        ORDER BY t.created_at DESC
-        LIMIT 1
-    """)
+        latest_power = db.execute(
+            select(TelemetrySample)
+            .where(
+                TelemetrySample.zone == rack.zone,
+                TelemetrySample.rack == rack.rack,
+            )
+            .order_by(TelemetrySample.created_at.desc())
+        ).scalars().all()
 
-    containers_sql = text("""
-        SELECT DISTINCT ON (t.container_name)
-            t.container_name,
-            t.host,
-            t.cpu_pct,
-            t.ram_mb,
-            t.temp_c,
-            t.hum_pct,
-            COALESCE(t.power_w, NULLIF(t.payload->>'power_w', '')::double precision) AS power_w,
-            t.created_at
-        FROM telemetry_samples t
-        WHERE t.zone = :zone
-          AND t.rack = :rack
-          AND t.container_name <> 'environment-simulator'
-        ORDER BY t.container_name, t.created_at DESC
-    """)
+        power_w = None
+        for sample in latest_power:
+            if sample.payload and isinstance(sample.payload, dict):
+                raw_power = sample.payload.get("power_w")
+                if raw_power is not None:
+                    try:
+                        power_w = float(raw_power)
+                        break
+                    except (TypeError, ValueError):
+                        pass
 
-    events_sql = text("""
-        SELECT
-            created_at,
-            event_type,
-            zone,
-            rack,
-            details
-        FROM audit_log
-        WHERE zone = :zone
-          AND rack = :rack
-        ORDER BY created_at DESC
-        LIMIT 20
-    """)
+        result.append(
+            RackSummaryResponse(
+                zone=rack.zone,
+                rack=rack.rack,
+                state=rack.state,
+                updated_at=latest_any.created_at if latest_any else rack.updated_at,
+                temp_c=latest_temp.temp_c if latest_temp else None,
+                hum_pct=latest_hum.hum_pct if latest_hum else None,
+                power_w=power_w,
+            )
+        )
 
-    with SessionLocal() as db:
-        rack_row = db.execute(rack_sql, {"zone": zone, "rack": rack}).mappings().first()
-        if rack_row is None:
-            return {
-                "zone": zone,
-                "rack": rack,
-                "state": "Unknown",
-                "updated_at": None,
-                "latest_metrics": None,
-                "containers": [],
-                "events": [],
-            }
-
-        latest_metrics = db.execute(
-            latest_env_sql, {"zone": zone, "rack": rack}
-        ).mappings().first()
-
-        containers = db.execute(
-            containers_sql, {"zone": zone, "rack": rack}
-        ).mappings().all()
-
-        events = db.execute(
-            events_sql, {"zone": zone, "rack": rack}
-        ).mappings().all()
-
-        return {
-            "zone": rack_row["zone"],
-            "rack": rack_row["rack"],
-            "state": rack_row["state"],
-            "updated_at": rack_row["updated_at"],
-            "latest_metrics": dict(latest_metrics) if latest_metrics else None,
-            "containers": [dict(row) for row in containers],
-            "events": [dict(row) for row in events],
-        }
+    return result
 
 
-@router.get("/audit/recent")
-def audit_recent(limit: int = Query(default=20, ge=1, le=100)) -> list[dict[str, Any]]:
-    sql = text("""
-        SELECT
-            created_at,
-            event_type,
-            zone,
-            rack,
-            command_id,
-            correlation_id,
-            details
-        FROM audit_log
-        ORDER BY created_at DESC
-        LIMIT :limit
-    """)
+@router.get("/racks/{zone}/{rack}", response_model=RackDetailResponse)
+def get_rack_detail(zone: str, rack: str, db: Session = Depends(get_db)) -> RackDetailResponse:
+    rack_row = db.execute(
+        select(RackState).where(
+            RackState.zone == zone,
+            RackState.rack == rack,
+        )
+    ).scalar_one_or_none()
 
-    with SessionLocal() as db:
-        rows = db.execute(sql, {"limit": limit}).mappings().all()
-        return [dict(row) for row in rows]
+    if rack_row is None:
+        raise HTTPException(status_code=404, detail="Rack not found")
+
+    samples = db.execute(
+        select(TelemetrySample)
+        .where(
+            TelemetrySample.zone == zone,
+            TelemetrySample.rack == rack,
+        )
+        .order_by(TelemetrySample.created_at.desc())
+    ).scalars().all()
+
+    if not samples:
+        return RackDetailResponse(
+            zone=zone,
+            rack=rack,
+            state=rack_row.state,
+            updated_at=rack_row.updated_at,
+            ambient=RackAmbientResponse(
+                temp_c=None,
+                hum_pct=None,
+                power_w=None,
+            ),
+            containers=[],
+        )
+
+    latest_temp = next((s for s in samples if s.temp_c is not None), None)
+    latest_hum = next((s for s in samples if s.hum_pct is not None), None)
+
+    power_w = None
+    for s in samples:
+        payload = s.payload if isinstance(s.payload, dict) else {}
+        raw_power = payload.get("power_w")
+        if raw_power is not None:
+            try:
+                power_w = float(raw_power)
+                break
+            except (TypeError, ValueError):
+                continue
+
+    latest_by_container: dict[str, TelemetrySample] = {}
+    for sample in samples:
+        cname = sample.container_name or "unknown"
+        if cname not in latest_by_container:
+            latest_by_container[cname] = sample
+
+    def safe_float(value) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    rack_lower = rack.lower()
+    allowed_names = {
+        f"sedcm-critico-{rack_lower}",
+        f"sedcm-svc-{rack_lower}-a",
+        f"sedcm-svc-{rack_lower}-b",
+    }
+
+    containers: list[RackContainerResponse] = []
+
+    for cname, sample in latest_by_container.items():
+        if cname not in allowed_names:
+            continue
+
+        payload = sample.payload if isinstance(sample.payload, dict) else {}
+
+        containers.append(
+            RackContainerResponse(
+                container_name=cname,
+                host=sample.host,
+                cpu_pct=sample.cpu_pct,
+                ram_mb=sample.ram_mb,
+                net_rx=safe_float(payload.get("net_rx")),
+                net_tx=safe_float(payload.get("net_tx")),
+                io_read=safe_float(payload.get("io_read")),
+                io_write=safe_float(payload.get("io_write")),
+                temp_c=sample.temp_c,
+                hum_pct=sample.hum_pct,
+                power_w=safe_float(payload.get("power_w")),
+                ts=sample.ts,
+            )
+        )
+
+    containers = sorted(containers, key=lambda c: c.container_name)
+
+    return RackDetailResponse(
+        zone=zone,
+        rack=rack,
+        state=rack_row.state,
+        updated_at=rack_row.updated_at,
+        ambient=RackAmbientResponse(
+            temp_c=latest_temp.temp_c if latest_temp else None,
+            hum_pct=latest_hum.hum_pct if latest_hum else None,
+            power_w=power_w,
+        ),
+        containers=containers,
+    )

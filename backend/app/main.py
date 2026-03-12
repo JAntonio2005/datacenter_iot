@@ -4,6 +4,7 @@ import os
 
 from fastapi import FastAPI
 
+from app.api.routes import router as api_router
 from app.core.logging import configure_logging
 from app.mqtt.ack_consumer import AckConsumer
 from app.mqtt.client import BackendMqttClient
@@ -35,9 +36,7 @@ def startup() -> None:
         on_event=ack_consumer.handle_message,
     )
 
-    # ya con el cliente real, lo inyectamos al publisher
     publisher.mqtt_client = mqtt_client
-
     mqtt_client.connect()
 
 
@@ -49,6 +48,4 @@ def shutdown() -> None:
     mqtt_client.disconnect()
 
 
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "service": "backend"}
+app.include_router(api_router)

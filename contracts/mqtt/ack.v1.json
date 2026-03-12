@@ -1,0 +1,11 @@
+{
+  "schema_version": "v1",
+  "command_id": "cmd-20260305-0001",
+  "zone": "A",
+  "rack": "A1",
+  "action": "stop_critico",
+  "status": "ok",
+  "details": "stopped 1 critical container",
+  "edge_id": "sedcm-edge-executor",
+  "timestamp": "2026-03-05T18:01:05Z"
+}

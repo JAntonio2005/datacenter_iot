@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import Mapping
 
 from app.db.models import TelemetrySample
 from app.db.session import SessionLocal
@@ -17,12 +19,50 @@ class TelemetryConsumer:
         self.engine = engine
         self.fusion = TelemetryFusion()
 
-    def handle_message(self, topic: str, payload: dict) -> None:
-        merged = self.fusion.merge(payload)
+    def handle_message(self, topic: str, payload: bytes) -> None:
+        try:
+            raw = json.loads(payload.decode("utf-8"))
+        except Exception as exc:
+            logger.warning(
+                "telemetry payload decode failed",
+                extra={"extra": {"topic": topic, "error": str(exc)}},
+            )
+            with SessionLocal() as db:
+                AuditService(db).record(
+                    "telemetry_rejected",
+                    details={
+                        "topic": topic,
+                        "reason": f"invalid json: {exc}",
+                        "payload_raw": payload.decode("utf-8", errors="replace"),
+                    },
+                )
+            return
+
+        if not isinstance(raw, Mapping):
+            logger.warning(
+                "telemetry payload is not an object",
+                extra={"extra": {"topic": topic, "payload_type": type(raw).__name__}},
+            )
+            with SessionLocal() as db:
+                AuditService(db).record(
+                    "telemetry_rejected",
+                    details={
+                        "topic": topic,
+                        "reason": "payload must be a JSON object",
+                        "payload": raw,
+                    },
+                )
+            return
+
+        merged = self.fusion.merge(raw)
+
         try:
             parsed = TelemetryPayload.model_validate(merged)
         except Exception as exc:
-            logger.warning("telemetry payload validation failed", extra={"extra": {"topic": topic, "error": str(exc)}})
+            logger.warning(
+                "telemetry payload validation failed",
+                extra={"extra": {"topic": topic, "error": str(exc)}},
+            )
             with SessionLocal() as db:
                 AuditService(db).record(
                     "telemetry_rejected",
@@ -54,7 +94,11 @@ class TelemetryConsumer:
                 "telemetry_ingested",
                 zone=parsed.zone,
                 rack=parsed.rack,
-                details={"topic": topic, "container": parsed.container_name, "temp_c": parsed.temp_c},
+                details={
+                    "topic": topic,
+                    "container": parsed.container_name,
+                    "temp_c": parsed.temp_c,
+                },
             )
 
             self.engine.evaluate(db=db, telemetry=row)

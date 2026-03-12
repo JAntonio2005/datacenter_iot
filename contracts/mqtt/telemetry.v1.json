@@ -1,0 +1,15 @@
+{
+  "metadata": {
+    "schema_version": "v1",
+    "zone": "A",
+    "rack": "A1",
+    "host": "env-sim",
+    "container": "environment-simulator",
+    "timestamp": "2026-03-05T18:00:00Z",
+    "source": "environment-simulator"
+  },
+  "environment": {
+    "temperature_c": 24.5,
+    "humidity_pct": 55.2
+  }
+}

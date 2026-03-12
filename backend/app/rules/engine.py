@@ -16,21 +16,38 @@ class RulesEngine:
         current_state = RackStatus(current.state) if current else RackStatus.NORMAL
         new_state = next_state(current_state, telemetry.temp_c or 0.0)
 
+        state_changed = new_state != current_state
+
         if current is None:
-            current = RackState(rack_key=rack_key, zone=telemetry.zone, rack=telemetry.rack, state=new_state.value)
+            current = RackState(
+                rack_key=rack_key,
+                zone=telemetry.zone,
+                rack=telemetry.rack,
+                state=new_state.value,
+            )
             db.add(current)
-        else:
+            db.commit()
+            state_changed = True
+        elif state_changed:
             current.state = new_state.value
-        db.commit()
+            db.commit()
 
         audit = AuditService(db)
-        audit.record(
-            "rack_state_transition",
-            zone=telemetry.zone,
-            rack=telemetry.rack,
-            details={"from": current_state.value, "to": new_state.value, "temp_c": telemetry.temp_c},
-        )
 
+        # Solo auditar transición si realmente cambió
+        if state_changed:
+            audit.record(
+                "rack_state_transition",
+                zone=telemetry.zone,
+                rack=telemetry.rack,
+                details={
+                    "from": current_state.value,
+                    "to": new_state.value,
+                    "temp_c": telemetry.temp_c,
+                },
+            )
+
+        # Solo emitir comando en transición real a Critical
         if new_state == RackStatus.CRITICAL and current_state != RackStatus.CRITICAL:
             command = self.command_publisher.publish_stop_critico(
                 zone=telemetry.zone,

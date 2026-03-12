@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -11,7 +12,14 @@ class CommandPublisher:
     def __init__(self, mqtt_client: BackendMqttClient) -> None:
         self.mqtt_client = mqtt_client
 
-    def publish_stop_critico(self, *, zone: str, rack: str, reason: str, correlation_id: str | None = None) -> dict:
+    def publish_stop_critico(
+        self,
+        *,
+        zone: str,
+        rack: str,
+        reason: str,
+        correlation_id: str | None = None,
+    ) -> dict:
         command = {
             "command_id": str(uuid4()),
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -21,5 +29,5 @@ class CommandPublisher:
             "reason": reason,
             "correlation_id": correlation_id or str(uuid4()),
         }
-        self.mqtt_client.publish(command_topic(zone, rack), command)
+        self.mqtt_client.publish(command_topic(zone, rack), json.dumps(command))
         return command

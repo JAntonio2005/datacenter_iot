@@ -13,15 +13,18 @@ class TelemetryPayload(BaseModel):
     host: str
     container_id: str
     container_name: str
+
     cpu_pct: float = Field(ge=0)
     ram_mb: float = Field(ge=0)
     net_rx: float = Field(ge=0)
     net_tx: float = Field(ge=0)
     io_read: float = Field(ge=0)
     io_write: float = Field(ge=0)
-    temp_c: float
-    hum_pct: float = Field(ge=0, le=100)
-    power_w: float | None = Field(default=None, ge=0)
+
+    # Ambientales opcionales (cAdvisor real no los trae)
+    temp_c: float | None = None
+    hum_pct: float | None = None
+    power_w: float | None = None
 
 
 class CommandPayload(BaseModel):

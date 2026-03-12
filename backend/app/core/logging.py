@@ -14,15 +14,43 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
-        if hasattr(record, "extra") and isinstance(record.extra, dict):
-            payload.update(record.extra)
+
+        # extras comunes que usas en el proyecto
+        extra_keys = (
+            "host",
+            "port",
+            "topic",
+            "error",
+            "reason",
+            "attempt",
+            "zone",
+            "rack",
+            "status",
+            "details",
+        )
+
+        for key in extra_keys:
+            if hasattr(record, key):
+                payload[key] = getattr(record, key)
+
         return json.dumps(payload, ensure_ascii=False)
 
 
 def configure_logging(level: int = logging.INFO) -> None:
+    root = logging.getLogger()
+
+    # evita duplicar handlers si vuelve a llamarse
+    if root.handlers:
+        root.handlers.clear()
+
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
-    root = logging.getLogger()
-    root.handlers.clear()
+
     root.addHandler(handler)
     root.setLevel(level)
+
+
+def get_logger(name: str) -> logging.Logger:
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+    return logger

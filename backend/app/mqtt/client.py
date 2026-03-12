@@ -1,58 +1,80 @@
 from __future__ import annotations
 
-import json
-import logging
-import os
-from collections.abc import Callable
-from typing import Any
+import time
 
 import paho.mqtt.client as mqtt
 
-logger = logging.getLogger(__name__)
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class BackendMqttClient:
-    def __init__(self) -> None:
-        self.host = os.getenv("MQTT_HOST", "localhost")
-        self.port = int(os.getenv("MQTT_PORT", "1883"))
-        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    def __init__(self, host: str, port: int, on_telemetry, on_event) -> None:
+        self.host = host
+        self.port = port
+        self.on_telemetry = on_telemetry
+        self.on_event = on_event
+
+        self.client = mqtt.Client()
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
-
-    def _on_connect(self, client: mqtt.Client, userdata: Any, flags: Any, reason_code: Any, properties: Any = None) -> None:
-        logger.info("backend mqtt connected", extra={"extra": {"host": self.host, "port": self.port}})
-
-    def _on_disconnect(self, client: mqtt.Client, userdata: Any, flags: Any, reason_code: Any, properties: Any = None) -> None:
-        logger.warning("backend mqtt disconnected", extra={"extra": {"reason": str(reason_code)}})
+        self.client.on_message = self._on_message
 
     def connect(self) -> None:
-        self.client.reconnect_delay_set(min_delay=1, max_delay=30)
-        self.client.connect(self.host, self.port, keepalive=30)
-
-    def loop_start(self) -> None:
-        self.client.loop_start()
-
-    def subscribe(self, topic: str, callback: Callable[[str, dict[str, Any]], None]) -> None:
-        def _wrapped(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> None:
+        attempts = 0
+        while True:
             try:
-                payload = json.loads(msg.payload.decode("utf-8"))
-            except json.JSONDecodeError:
-                logger.warning("backend mqtt received invalid json", extra={"extra": {"topic": msg.topic}})
+                attempts += 1
+                logger.info(
+                    "backend mqtt connecting",
+                    extra={"host": self.host, "port": self.port, "attempt": attempts},
+                )
+                self.client.connect(self.host, self.port, keepalive=30)
+                self.client.loop_start()
                 return
-
-            try:
-                callback(msg.topic, payload)
-            except Exception as exc:
-                logger.exception("backend mqtt callback failed", extra={"extra": {"topic": msg.topic, "error": str(exc)}})
-
-        self.client.message_callback_add(topic, _wrapped)
-        self.client.subscribe(topic)
-
-    def publish(self, topic: str, payload: dict[str, Any]) -> None:
-        self.client.publish(topic, json.dumps(payload), qos=1)
-
-    def loop_stop(self) -> None:
-        self.client.loop_stop()
+            except Exception as e:
+                logger.warning(
+                    "backend mqtt connect failed; retrying",
+                    extra={
+                        "host": self.host,
+                        "port": self.port,
+                        "attempt": attempts,
+                        "error": str(e),
+                    },
+                )
+                time.sleep(3)
 
     def disconnect(self) -> None:
-        self.client.disconnect()
+        try:
+            self.client.loop_stop()
+            self.client.disconnect()
+        except Exception:
+            pass
+
+    def publish(self, topic: str, payload: str) -> None:
+        self.client.publish(topic, payload)
+
+    def _on_connect(self, client, userdata, flags, rc):
+        logger.info(
+            "backend mqtt connected",
+            extra={"host": self.host, "port": self.port, "rc": rc},
+        )
+        client.subscribe("dc/telemetria/#")
+        client.subscribe("dc/eventos/#")
+
+    def _on_disconnect(self, client, userdata, rc):
+        logger.warning("backend mqtt disconnected", extra={"reason": rc})
+
+    def _on_message(self, client, userdata, msg):
+        topic = msg.topic
+        try:
+            if mqtt.topic_matches_sub("dc/telemetria/#", topic):
+                self.on_telemetry(topic, msg.payload)
+            elif mqtt.topic_matches_sub("dc/eventos/#", topic):
+                self.on_event(topic, msg.payload)
+        except Exception as e:
+            logger.error(
+                "backend mqtt callback failed",
+                extra={"topic": topic, "error": str(e)},
+            )

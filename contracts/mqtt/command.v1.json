@@ -1,0 +1,9 @@
+{
+  "schema_version": "v1",
+  "command_id": "cmd-20260305-0001",
+  "zone": "A",
+  "rack": "A1",
+  "action": "stop_critico",
+  "reason": "temperature above threshold",
+  "issued_at": "2026-03-05T18:01:00Z"
+}

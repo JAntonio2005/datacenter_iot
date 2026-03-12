@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+import os
+
 from fastapi import FastAPI
 
 from app.core.logging import configure_logging
@@ -17,15 +21,24 @@ def startup() -> None:
     global mqtt_client
     configure_logging()
 
-    mqtt_client = BackendMqttClient()
-    publisher = CommandPublisher(mqtt_client)
-    telemetry_consumer = TelemetryConsumer(RulesEngine(publisher))
+    mqtt_host = os.getenv("MQTT_HOST", "mosquitto")
+    mqtt_port = int(os.getenv("MQTT_PORT", "1883"))
+
     ack_consumer = AckConsumer()
+    publisher = CommandPublisher(None)  # placeholder temporal
+    telemetry_consumer = TelemetryConsumer(RulesEngine(publisher))
+
+    mqtt_client = BackendMqttClient(
+        host=mqtt_host,
+        port=mqtt_port,
+        on_telemetry=telemetry_consumer.handle_message,
+        on_event=ack_consumer.handle_message,
+    )
+
+    # ya con el cliente real, lo inyectamos al publisher
+    publisher.mqtt_client = mqtt_client
 
     mqtt_client.connect()
-    mqtt_client.loop_start()
-    mqtt_client.subscribe("dc/telemetria/zona/+/rack/+/host/+/contenedor/+", telemetry_consumer.handle_message)
-    mqtt_client.subscribe("dc/eventos/zona/+/rack/+", ack_consumer.handle_message)
 
 
 @app.on_event("shutdown")
@@ -33,7 +46,6 @@ def shutdown() -> None:
     global mqtt_client
     if mqtt_client is None:
         return
-    mqtt_client.loop_stop()
     mqtt_client.disconnect()
 
 

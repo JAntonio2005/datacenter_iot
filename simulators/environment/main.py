@@ -18,7 +18,7 @@ HOST = "env-sim"
 BASE_TEMP = 24.0
 BASE_HUM = 55.0
 
-PIKE_TEMP = 45.0
+SPIKE_TEMP = 45.0
 
 SPIKE_EVERY_SEC = 15  # fuerza CRITICAL en pruebas (A/A1)
 

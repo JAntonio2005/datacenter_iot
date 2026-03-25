@@ -1,25 +1,20 @@
 <!--
 Sync Impact Report
-- Version change: N/A -> 1.0.0
+- Version change: 1.0.0 -> 1.0.1
 - Modified principles:
-	- Template Principle 1 -> I. Seguridad Térmica Primero
-	- Template Principle 2 -> II. Arquitectura Desacoplada por Eventos
-	- Template Principle 3 -> III. Trazabilidad y Auditoría Obligatorias
-	- Template Principle 4 -> IV. Idempotencia y Tolerancia a Fallos
-	- Template Principle 5 -> V. Histéresis y Estabilidad de Estado
+  - None
 - Added sections:
-	- Restricciones Operativas del MVP
-	- Flujo de Desarrollo y Quality Gates
+  - None
 - Removed sections:
-	- None
+  - None
 - Templates requiring updates:
-	- ✅ .specify/templates/plan-template.md
-	- ✅ .specify/templates/spec-template.md
-	- ✅ .specify/templates/tasks-template.md
-	- ⚠ pending: .specify/templates/commands/*.md (directory not present)
-	- ⚠ pending: README.md / docs/quickstart.md (files not present)
-- Deferred TODOs:
-	- None
+  - ✅ .specify/templates/plan-template.md
+  - ✅ .specify/templates/spec-template.md
+  - ✅ .specify/templates/tasks-template.md
+  - ⚠ pending: .specify/templates/commands/*.md (directory not present)
+  - ⚠ pending: README.md / docs/quickstart.md (files not present)
+- Follow-up TODOs:
+  - None
 -->
 
 # SEDCM (Smart Edge Data Center Manager) Constitution
@@ -69,7 +64,8 @@ operación entendible para el equipo.
 - La persistencia oficial del MVP MUST ser PostgreSQL para telemetría, estado actual
 	y auditoría.
 - El dashboard MUST reflejar estado por zona/rack, métricas recientes y eventos en
-	tiempo real (WebSocket preferido; polling solo como contingencia documentada).
+	tiempo real; en el MVP se acepta polling periódico y WebSocket queda como mejora
+	opcional documentada.
 - Fuera de alcance actual: sensores físicos reales, HA multi-broker y hardening TLS
 	completo si compromete la demo local.
 
@@ -77,6 +73,8 @@ operación entendible para el equipo.
 
 - Toda especificación MUST declarar contratos de mensajes (telemetría, comandos, ACK)
 	y reglas de transición de estado antes de implementación.
+- Cambios en contratos MUST actualizar esquemas Pydantic y pruebas de contrato en
+	el mismo cambio para evitar drift.
 - Todo plan MUST pasar un Constitution Check con evidencia de: seguridad térmica,
 	desacoplamiento por eventos, trazabilidad, idempotencia e histéresis.
 - Toda lista de tareas MUST incluir pruebas/validaciones para lógica crítica:
@@ -106,4 +104,4 @@ Revisión de cumplimiento:
 - En ejecución: evidencia de pruebas/validaciones de reglas críticas.
 - En cierre: confirmación de trazabilidad y criterios DoD de la feature.
 
-**Version**: 1.0.0 | **Ratified**: 2026-03-04 | **Last Amended**: 2026-03-04
+**Version**: 1.0.1 | **Ratified**: 2026-03-04 | **Last Amended**: 2026-03-12

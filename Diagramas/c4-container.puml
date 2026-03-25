@@ -1,0 +1,32 @@
+@startuml
+
+title C4 - Contenedores (C2) - SEDCM
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam wrapWidth 220
+
+actor "Operador" as operador
+
+node "Docker Compose" {
+  component "Frontend Angular" as frontend
+  component "Backend API + Rules" as backend
+  component "Edge Executor" as edge
+  queue "MQTT Broker" as mqtt
+  database "PostgreSQL" as postgres
+  component "cAdvisor Bridge" as cadvisor
+  component "Environment Simulator" as envsim
+}
+
+cloud "Docker API Local" as dockerapi
+
+operador --> frontend : UI
+frontend --> backend : REST /racks
+backend --> postgres : SQL
+backend --> mqtt : comandos
+mqtt --> backend : telemetria/ACK
+mqtt --> edge : comandos
+edge --> dockerapi : stop contenedor
+cadvisor --> mqtt : telemetria
+envsim --> mqtt : telemetria ambiental
+
+@enduml

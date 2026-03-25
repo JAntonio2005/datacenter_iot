@@ -17,6 +17,8 @@ class JsonFormatter(logging.Formatter):
 
         # extras comunes que usas en el proyecto
         extra_keys = (
+            "event",
+            "flow",
             "host",
             "port",
             "topic",
@@ -25,7 +27,11 @@ class JsonFormatter(logging.Formatter):
             "attempt",
             "zone",
             "rack",
+            "rack_id",
             "status",
+            "message_id",
+            "command_id",
+            "correlation_id",
             "details",
         )
 

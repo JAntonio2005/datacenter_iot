@@ -6,6 +6,7 @@ from fastapi import APIRouter, Query
 from sqlalchemy import text
 
 from app.db.session import SessionLocal
+from app.services.inventory_service import InventoryService
 
 router = APIRouter()
 
@@ -19,23 +20,24 @@ def health() -> dict[str, str]:
 def list_racks() -> list[dict[str, Any]]:
     sql = text("""
         SELECT
-            rs.zone,
-            rs.rack,
-            rs.state,
-            rs.updated_at,
-            ts.temp_c,
-            ts.hum_pct,
-            COALESCE(ts.power_w, NULLIF(ts.payload->>'power_w', '')::double precision) AS power_w
-        FROM rack_state rs
+            z.codigo AS zone,
+            r.codigo AS rack,
+            er.estado AS state,
+            er.actualizado_en AS updated_at,
+            mt.temp_c,
+            mt.hum_pct,
+            mt.power_w
+        FROM estado_rack er
+        JOIN racks r ON r.id = er.rack_id
+        JOIN zonas z ON z.id = r.zona_id
         LEFT JOIN LATERAL (
             SELECT *
-            FROM telemetry_samples t
-            WHERE t.zone = rs.zone
-              AND t.rack = rs.rack
-            ORDER BY t.created_at DESC
+            FROM muestras_telemetria m
+            WHERE m.rack_id = r.id
+            ORDER BY m.creado_en DESC
             LIMIT 1
-        ) ts ON true
-        ORDER BY rs.zone, rs.rack
+        ) mt ON true
+        ORDER BY z.codigo, r.codigo
     """)
 
     with SessionLocal() as db:
@@ -50,56 +52,51 @@ def rack_detail(zone: str, rack: str) -> dict[str, Any]:
 
     rack_sql = text("""
         SELECT
-            rs.zone,
-            rs.rack,
-            rs.state,
-            rs.updated_at
-        FROM rack_state rs
-        WHERE rs.zone = :zone AND rs.rack = :rack
+            z.codigo AS zone,
+            r.codigo AS rack,
+            r.id AS rack_id,
+            er.estado AS state,
+            er.actualizado_en AS updated_at
+        FROM racks r
+        JOIN zonas z ON z.id = r.zona_id
+        LEFT JOIN estado_rack er ON er.rack_id = r.id
+        WHERE z.codigo = :zone AND r.codigo = :rack
         LIMIT 1
     """)
 
     latest_env_sql = text("""
         SELECT
-            t.created_at,
+            t.creado_en AS created_at,
             t.temp_c,
             t.hum_pct,
-            COALESCE(t.power_w, NULLIF(t.payload->>'power_w', '')::double precision) AS power_w
-        FROM telemetry_samples t
-        WHERE t.zone = :zone
-          AND t.rack = :rack
-        ORDER BY t.created_at DESC
+            t.power_w
+        FROM muestras_telemetria t
+        WHERE t.rack_id = :rack_id
+        ORDER BY t.creado_en DESC
         LIMIT 1
     """)
 
     containers_sql = text("""
-        SELECT DISTINCT ON (t.container_name)
-            t.container_name,
-            t.host,
-            t.cpu_pct,
-            t.ram_mb,
-            t.temp_c,
-            t.hum_pct,
-            COALESCE(t.power_w, NULLIF(t.payload->>'power_w', '')::double precision) AS power_w,
-            t.created_at
-        FROM telemetry_samples t
-        WHERE t.zone = :zone
-          AND t.rack = :rack
-          AND t.container_name <> 'environment-simulator'
-        ORDER BY t.container_name, t.created_at DESC
+        SELECT
+            c.nombre_contenedor AS container_name,
+            c.host,
+            c.rol,
+            c.es_critico,
+            c.estado,
+            c.creado_en
+        FROM contenedores c
+        WHERE c.rack_id = :rack_id
+        ORDER BY c.nombre_contenedor
     """)
 
     events_sql = text("""
         SELECT
-            created_at,
-            event_type,
-            zone,
-            rack,
-            details
-        FROM audit_log
-        WHERE zone = :zone
-          AND rack = :rack
-        ORDER BY created_at DESC
+            creado_en AS created_at,
+            tipo_evento AS event_type,
+            detalles AS details
+        FROM auditoria
+        WHERE rack_id = :rack_id
+        ORDER BY creado_en DESC
         LIMIT 20
     """)
 
@@ -117,15 +114,15 @@ def rack_detail(zone: str, rack: str) -> dict[str, Any]:
             }
 
         latest_metrics = db.execute(
-            latest_env_sql, {"zone": zone, "rack": rack}
+            latest_env_sql, {"rack_id": rack_row["rack_id"]}
         ).mappings().first()
 
         containers = db.execute(
-            containers_sql, {"zone": zone, "rack": rack}
+            containers_sql, {"rack_id": rack_row["rack_id"]}
         ).mappings().all()
 
         events = db.execute(
-            events_sql, {"zone": zone, "rack": rack}
+            events_sql, {"rack_id": rack_row["rack_id"]}
         ).mappings().all()
 
         return {
@@ -139,19 +136,39 @@ def rack_detail(zone: str, rack: str) -> dict[str, Any]:
         }
 
 
+@router.get("/inventory/zones")
+def inventory_zones() -> list[dict[str, Any]]:
+    with SessionLocal() as db:
+        return InventoryService(db).list_zones()
+
+
+@router.get("/inventory/zones/{zone}/racks")
+def inventory_racks(zone: str) -> list[dict[str, Any]]:
+    with SessionLocal() as db:
+        return InventoryService(db).list_racks_by_zone(zone)
+
+
+@router.get("/inventory/racks/{rack}/containers")
+def inventory_containers(rack: str) -> list[dict[str, Any]]:
+    with SessionLocal() as db:
+        return InventoryService(db).list_containers_by_rack(rack)
+
+
 @router.get("/audit/recent")
 def audit_recent(limit: int = Query(default=20, ge=1, le=100)) -> list[dict[str, Any]]:
     sql = text("""
         SELECT
-            created_at,
-            event_type,
-            zone,
-            rack,
-            command_id,
-            correlation_id,
-            details
-        FROM audit_log
-        ORDER BY created_at DESC
+            a.creado_en AS created_at,
+            a.tipo_evento AS event_type,
+            z.codigo AS zone,
+            r.codigo AS rack,
+            a.id_comando AS command_id,
+            a.id_correlacion AS correlation_id,
+            a.detalles AS details
+        FROM auditoria a
+        LEFT JOIN racks r ON r.id = a.rack_id
+        LEFT JOIN zonas z ON z.id = r.zona_id
+        ORDER BY a.creado_en DESC
         LIMIT :limit
     """)
 

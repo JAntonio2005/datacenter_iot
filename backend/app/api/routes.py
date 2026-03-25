@@ -1,17 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from typing import Any
 
-from app.api.schemas import (
-    RackAmbientResponse,
-    RackContainerResponse,
-    RackDetailResponse,
-    RackSummaryResponse,
-)
-from app.db.models import RackState, TelemetrySample
-from app.db.session import get_db
+from fastapi import APIRouter, Query
+from sqlalchemy import text
+
+from app.db.session import SessionLocal
+from app.services.inventory_service import InventoryService
 
 router = APIRouter()
 
@@ -21,188 +16,162 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "backend"}
 
 
-@router.get("/racks", response_model=list[RackSummaryResponse])
-def get_racks(db: Session = Depends(get_db)) -> list[RackSummaryResponse]:
-    racks = db.execute(
-        select(RackState).order_by(RackState.zone, RackState.rack)
-    ).scalars().all()
+@router.get("/racks")
+def list_racks() -> list[dict[str, Any]]:
+    sql = text("""
+        SELECT
+            z.codigo AS zone,
+            r.codigo AS rack,
+            er.estado AS state,
+            er.actualizado_en AS updated_at,
+            mt.temp_c,
+            mt.hum_pct,
+            mt.power_w
+        FROM estado_rack er
+        JOIN racks r ON r.id = er.rack_id
+        JOIN zonas z ON z.id = r.zona_id
+        LEFT JOIN LATERAL (
+            SELECT *
+            FROM muestras_telemetria m
+            WHERE m.rack_id = r.id
+            ORDER BY m.creado_en DESC
+            LIMIT 1
+        ) mt ON true
+        ORDER BY z.codigo, r.codigo
+    """)
 
-    result: list[RackSummaryResponse] = []
-
-    for rack in racks:
-        latest_any = db.execute(
-            select(TelemetrySample)
-            .where(
-                TelemetrySample.zone == rack.zone,
-                TelemetrySample.rack == rack.rack,
-            )
-            .order_by(TelemetrySample.created_at.desc())
-            .limit(1)
-        ).scalar_one_or_none()
-
-        latest_temp = db.execute(
-            select(TelemetrySample)
-            .where(
-                TelemetrySample.zone == rack.zone,
-                TelemetrySample.rack == rack.rack,
-                TelemetrySample.temp_c.is_not(None),
-            )
-            .order_by(TelemetrySample.created_at.desc())
-            .limit(1)
-        ).scalar_one_or_none()
-
-        latest_hum = db.execute(
-            select(TelemetrySample)
-            .where(
-                TelemetrySample.zone == rack.zone,
-                TelemetrySample.rack == rack.rack,
-                TelemetrySample.hum_pct.is_not(None),
-            )
-            .order_by(TelemetrySample.created_at.desc())
-            .limit(1)
-        ).scalar_one_or_none()
-
-        latest_power = db.execute(
-            select(TelemetrySample)
-            .where(
-                TelemetrySample.zone == rack.zone,
-                TelemetrySample.rack == rack.rack,
-            )
-            .order_by(TelemetrySample.created_at.desc())
-        ).scalars().all()
-
-        power_w = None
-        for sample in latest_power:
-            if sample.payload and isinstance(sample.payload, dict):
-                raw_power = sample.payload.get("power_w")
-                if raw_power is not None:
-                    try:
-                        power_w = float(raw_power)
-                        break
-                    except (TypeError, ValueError):
-                        pass
-
-        result.append(
-            RackSummaryResponse(
-                zone=rack.zone,
-                rack=rack.rack,
-                state=rack.state,
-                updated_at=latest_any.created_at if latest_any else rack.updated_at,
-                temp_c=latest_temp.temp_c if latest_temp else None,
-                hum_pct=latest_hum.hum_pct if latest_hum else None,
-                power_w=power_w,
-            )
-        )
-
-    return result
+    with SessionLocal() as db:
+        rows = db.execute(sql).mappings().all()
+        return [dict(row) for row in rows]
 
 
-@router.get("/racks/{zone}/{rack}", response_model=RackDetailResponse)
-def get_rack_detail(zone: str, rack: str, db: Session = Depends(get_db)) -> RackDetailResponse:
-    rack_row = db.execute(
-        select(RackState).where(
-            RackState.zone == zone,
-            RackState.rack == rack,
-        )
-    ).scalar_one_or_none()
+@router.get("/racks/{zone}/{rack}")
+def rack_detail(zone: str, rack: str) -> dict[str, Any]:
+    zone = zone.upper()
+    rack = rack.upper()
 
-    if rack_row is None:
-        raise HTTPException(status_code=404, detail="Rack not found")
+    rack_sql = text("""
+        SELECT
+            z.codigo AS zone,
+            r.codigo AS rack,
+            r.id AS rack_id,
+            er.estado AS state,
+            er.actualizado_en AS updated_at
+        FROM racks r
+        JOIN zonas z ON z.id = r.zona_id
+        LEFT JOIN estado_rack er ON er.rack_id = r.id
+        WHERE z.codigo = :zone AND r.codigo = :rack
+        LIMIT 1
+    """)
 
-    samples = db.execute(
-        select(TelemetrySample)
-        .where(
-            TelemetrySample.zone == zone,
-            TelemetrySample.rack == rack,
-        )
-        .order_by(TelemetrySample.created_at.desc())
-    ).scalars().all()
+    latest_env_sql = text("""
+        SELECT
+            t.creado_en AS created_at,
+            t.temp_c,
+            t.hum_pct,
+            t.power_w
+        FROM muestras_telemetria t
+        WHERE t.rack_id = :rack_id
+        ORDER BY t.creado_en DESC
+        LIMIT 1
+    """)
 
-    if not samples:
-        return RackDetailResponse(
-            zone=zone,
-            rack=rack,
-            state=rack_row.state,
-            updated_at=rack_row.updated_at,
-            ambient=RackAmbientResponse(
-                temp_c=None,
-                hum_pct=None,
-                power_w=None,
-            ),
-            containers=[],
-        )
+    containers_sql = text("""
+        SELECT
+            c.nombre_contenedor AS container_name,
+            c.host,
+            c.rol,
+            c.es_critico,
+            c.estado,
+            c.creado_en
+        FROM contenedores c
+        WHERE c.rack_id = :rack_id
+        ORDER BY c.nombre_contenedor
+    """)
 
-    latest_temp = next((s for s in samples if s.temp_c is not None), None)
-    latest_hum = next((s for s in samples if s.hum_pct is not None), None)
+    events_sql = text("""
+        SELECT
+            creado_en AS created_at,
+            tipo_evento AS event_type,
+            detalles AS details
+        FROM auditoria
+        WHERE rack_id = :rack_id
+        ORDER BY creado_en DESC
+        LIMIT 20
+    """)
 
-    power_w = None
-    for s in samples:
-        payload = s.payload if isinstance(s.payload, dict) else {}
-        raw_power = payload.get("power_w")
-        if raw_power is not None:
-            try:
-                power_w = float(raw_power)
-                break
-            except (TypeError, ValueError):
-                continue
+    with SessionLocal() as db:
+        rack_row = db.execute(rack_sql, {"zone": zone, "rack": rack}).mappings().first()
+        if rack_row is None:
+            return {
+                "zone": zone,
+                "rack": rack,
+                "state": "Unknown",
+                "updated_at": None,
+                "latest_metrics": None,
+                "containers": [],
+                "events": [],
+            }
 
-    latest_by_container: dict[str, TelemetrySample] = {}
-    for sample in samples:
-        cname = sample.container_name or "unknown"
-        if cname not in latest_by_container:
-            latest_by_container[cname] = sample
+        latest_metrics = db.execute(
+            latest_env_sql, {"rack_id": rack_row["rack_id"]}
+        ).mappings().first()
 
-    def safe_float(value) -> float | None:
-        if value is None:
-            return None
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
+        containers = db.execute(
+            containers_sql, {"rack_id": rack_row["rack_id"]}
+        ).mappings().all()
 
-    rack_lower = rack.lower()
-    allowed_names = {
-        f"sedcm-critico-{rack_lower}",
-        f"sedcm-svc-{rack_lower}-a",
-        f"sedcm-svc-{rack_lower}-b",
-    }
+        events = db.execute(
+            events_sql, {"rack_id": rack_row["rack_id"]}
+        ).mappings().all()
 
-    containers: list[RackContainerResponse] = []
+        return {
+            "zone": rack_row["zone"],
+            "rack": rack_row["rack"],
+            "state": rack_row["state"],
+            "updated_at": rack_row["updated_at"],
+            "latest_metrics": dict(latest_metrics) if latest_metrics else None,
+            "containers": [dict(row) for row in containers],
+            "events": [dict(row) for row in events],
+        }
 
-    for cname, sample in latest_by_container.items():
-        if cname not in allowed_names:
-            continue
 
-        payload = sample.payload if isinstance(sample.payload, dict) else {}
+@router.get("/inventory/zones")
+def inventory_zones() -> list[dict[str, Any]]:
+    with SessionLocal() as db:
+        return InventoryService(db).list_zones()
 
-        containers.append(
-            RackContainerResponse(
-                container_name=cname,
-                host=sample.host,
-                cpu_pct=sample.cpu_pct,
-                ram_mb=sample.ram_mb,
-                net_rx=safe_float(payload.get("net_rx")),
-                net_tx=safe_float(payload.get("net_tx")),
-                io_read=safe_float(payload.get("io_read")),
-                io_write=safe_float(payload.get("io_write")),
-                temp_c=sample.temp_c,
-                hum_pct=sample.hum_pct,
-                power_w=safe_float(payload.get("power_w")),
-                ts=sample.ts,
-            )
-        )
 
-    containers = sorted(containers, key=lambda c: c.container_name)
+@router.get("/inventory/zones/{zone}/racks")
+def inventory_racks(zone: str) -> list[dict[str, Any]]:
+    with SessionLocal() as db:
+        return InventoryService(db).list_racks_by_zone(zone)
 
-    return RackDetailResponse(
-        zone=zone,
-        rack=rack,
-        state=rack_row.state,
-        updated_at=rack_row.updated_at,
-        ambient=RackAmbientResponse(
-            temp_c=latest_temp.temp_c if latest_temp else None,
-            hum_pct=latest_hum.hum_pct if latest_hum else None,
-            power_w=power_w,
-        ),
-        containers=containers,
-    )
+
+@router.get("/inventory/racks/{rack}/containers")
+def inventory_containers(rack: str) -> list[dict[str, Any]]:
+    with SessionLocal() as db:
+        return InventoryService(db).list_containers_by_rack(rack)
+
+
+@router.get("/audit/recent")
+def audit_recent(limit: int = Query(default=20, ge=1, le=100)) -> list[dict[str, Any]]:
+    sql = text("""
+        SELECT
+            a.creado_en AS created_at,
+            a.tipo_evento AS event_type,
+            z.codigo AS zone,
+            r.codigo AS rack,
+            a.id_comando AS command_id,
+            a.id_correlacion AS correlation_id,
+            a.detalles AS details
+        FROM auditoria a
+        LEFT JOIN racks r ON r.id = a.rack_id
+        LEFT JOIN zonas z ON z.id = r.zona_id
+        ORDER BY a.creado_en DESC
+        LIMIT :limit
+    """)
+
+    with SessionLocal() as db:
+        rows = db.execute(sql, {"limit": limit}).mappings().all()
+        return [dict(row) for row in rows]

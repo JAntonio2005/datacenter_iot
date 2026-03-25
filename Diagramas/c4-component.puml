@@ -1,0 +1,54 @@
+@startuml
+
+title C4 - Componentes (C3) - Backend y Edge
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam wrapWidth 220
+
+package "Backend" {
+  component "TelemetryConsumer" as telemetry
+  component "TelemetryFusion" as fusion
+  component "RulesEngine" as rules
+  component "CommandPublisher" as publisher
+  component "AckConsumer" as ack
+  component "AuditService" as audit
+  component "DB Session" as db
+}
+
+package "Edge Executor" {
+  component "EdgeMqttClient" as edgeMqtt
+  component "CommandHandler" as handler
+  component "DockerAdapter" as docker
+  component "AckPublisher" as edgeAck
+  component "Idempotency" as idem
+}
+
+queue "MQTT Broker" as mqtt
+cloud "Docker API" as dockerapi
+rectangle "PostgreSQL" as postgres
+
+telemetry --> fusion : merge
+telemetry --> db : persist
+telemetry --> rules : evaluate
+rules --> publisher : stop_critico
+rules --> audit : log
+ack --> audit : log
+publisher --> mqtt : publish command
+mqtt --> telemetry : telemetry
+mqtt --> ack : ACK
+
+edgeMqtt --> handler : on_message
+handler --> idem : dedupe
+handler --> docker : stop_critico
+handler --> edgeAck : publish ACK
+edgeAck --> mqtt : ACK
+edgeMqtt --> mqtt : subscribe
+
+docker --> dockerapi : stop container
+
+telemetry --> postgres : telemetry_samples
+rules --> postgres : rack_state
+ack --> postgres : audit_log
+idem --> postgres : processed_message
+
+@enduml

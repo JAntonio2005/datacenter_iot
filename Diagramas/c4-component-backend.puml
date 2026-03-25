@@ -1,0 +1,39 @@
+@startuml
+
+title C4 - Componentes (C3) - Backend SEDCM
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam wrapWidth 220
+
+package "Backend (FastAPI + Rules Engine)" {
+  component "API Router\n(/health, /racks, /racks/{zone}/{rack})" as api
+  component "TelemetryConsumer" as telemetry
+  component "TelemetryFusion" as fusion
+  component "RulesEngine" as rules
+  component "StateMachine" as stateMachine
+  component "CommandPublisher" as publisher
+  component "AckConsumer" as ack
+  component "AuditService" as audit
+  component "DB Session" as db
+}
+
+queue "MQTT Broker" as mqtt
+rectangle "PostgreSQL" as postgres
+
+api --> db : consultas racks
+telemetry --> fusion : merge
+telemetry --> db : persist telemetry
+telemetry --> rules : evaluate
+rules --> stateMachine : next_state
+rules --> publisher : stop_critico
+rules --> audit : log
+ack --> audit : log
+publisher --> mqtt : publish command
+mqtt --> telemetry : telemetry
+mqtt --> ack : ACK
+
+telemetry --> postgres : telemetry_samples
+rules --> postgres : rack_state
+ack --> postgres : audit_log
+
+@enduml

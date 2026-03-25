@@ -1,0 +1,32 @@
+@startuml
+
+title C4 - Contexto (C1) - SEDCM
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam wrapWidth 220
+
+actor "Operador" as operador
+
+rectangle "SEDCM" as sedcm {
+  component "Frontend Angular" as frontend
+  component "Backend (FastAPI + Rules Engine)" as backend
+  component "Edge Executor" as edge
+}
+
+queue "MQTT Broker\n(Mosquitto)" as mqtt
+cloud "Docker API Local" as dockerapi
+rectangle "PostgreSQL" as postgres
+rectangle "cAdvisor" as cadvisor
+rectangle "Environment Simulator" as envsim
+
+operador --> frontend : consulta dashboard
+frontend --> backend : HTTP REST
+backend --> postgres : persistencia
+backend --> mqtt : publica comandos
+mqtt --> backend : telemetria y ACK
+mqtt --> edge : comandos
+edge --> dockerapi : stop contenedor critico
+cadvisor --> mqtt : telemetria contenedores
+envsim --> mqtt : telemetria ambiental
+
+@enduml
